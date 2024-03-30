@@ -154,8 +154,11 @@ class LlamaModel(nn.Module):
             mask = nn.MultiHeadAttention.create_additive_causal_mask(h.shape[1])
             mask = mask.astype(h.dtype)
 
-        for e, layer in enumerate(self.layers):
-            h = layer(h, mask, cache=cache[e])
+        if cache is None:
+            cache = [None] * len(self.layers)
+
+        for layer, cache in zip(self.layers, cache):
+            h = layer(h, mask, cache=cache)
 
         return self.norm(h)
 
