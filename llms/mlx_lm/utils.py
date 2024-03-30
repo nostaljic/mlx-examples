@@ -18,6 +18,7 @@ from mlx.utils import tree_flatten
 from transformers import AutoConfig, AutoTokenizer, PreTrainedTokenizer
 
 # Local imports
+from .models.base import KVCache
 from .sample_utils import top_p_sampling
 from .tokenizer_utils import TokenizerWrapper, load_tokenizer
 from .tuner.utils import apply_lora_layers
@@ -120,6 +121,7 @@ def generate_step(
     prompt: mx.array,
     model: nn.Module,
     temp: float = 0.0,
+    max_tokens: int = 1.0,
     repetition_penalty: Optional[float] = None,
     repetition_context_size: Optional[int] = 20,
     top_p: float = 1.0,
@@ -162,15 +164,17 @@ def generate_step(
         )
 
     y = prompt
-    cache = None
-
+    cache = [
+        KVCache(max_tokens, model.head_dim, model.n_kv_heads)
+        for _ in range(len(model.layers))
+    ]
     repetition_context = prompt.tolist()
 
     if repetition_context_size:
         repetition_context = repetition_context[-repetition_context_size:]
 
     def _step(y):
-        nonlocal cache, repetition_context
+        nonlocal repetition_context
         logits, cache = model(y[None], cache=cache)
         logits = logits[:, -1, :]
 
@@ -239,16 +243,16 @@ def generate(
     tic = time.perf_counter()
     detokenizer.reset()
 
-    for (token, prob), n in zip(
+    for n, (token, prob) in enumerate(
         generate_step(
             prompt_tokens,
             model,
             temp,
+            max_tokens,
             repetition_penalty,
             repetition_context_size,
             top_p,
-        ),
-        range(max_tokens),
+        )
     ):
         if n == 0:
             prompt_time = time.perf_counter() - tic
